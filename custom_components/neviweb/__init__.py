@@ -1,4 +1,4 @@
-"""Sinopé GT125 Miwi devices support."""
+"""Schluter DITRA-HEAT-E-RS1 support."""
 
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=540)
 
 REQUESTS_TIMEOUT = 30
-HOST = "https://neviweb.com"
+HOST = "https://schluterditraheat.com"
 LOGIN_URL = "{}/api/login".format(HOST)
 LOCATIONS_URL = "{}/api/locations?account$id=".format(HOST)
 GATEWAY_DEVICE_URL = "{}/api/devices?location$id=".format(HOST)
@@ -142,9 +142,6 @@ def setup(hass: HomeAssistant, hass_config: dict[str, Any]) -> bool:
     _LOGGER.debug("Setting scan interval to: %s", SCAN_INTERVAL)
 
     discovery.load_platform(hass, 'climate', DOMAIN, {}, hass_config)
-    discovery.load_platform(hass, 'light', DOMAIN, {}, hass_config)
-    discovery.load_platform(hass, 'switch', DOMAIN, {}, hass_config)
-    discovery.load_platform(hass, 'sensor', DOMAIN, {}, hass_config)
 
     return True
 
@@ -221,7 +218,7 @@ class NeviwebClient(object):
         """Login to Neviweb."""
         increment_request_counter(self.hass)
         data = {"username": self._email, "password": self._password, 
-            "interface": "neviweb", "stayConnected": 1}
+            "interface": "schluter", "stayConnected": 1}
         try:
             raw_res = requests.post(LOGIN_URL, json=data, 
                 cookies=self._cookies, allow_redirects=False, 
@@ -433,7 +430,7 @@ class NeviwebClient(object):
         # Http request
         try:
             raw_res = requests.get(DEVICE_DATA_URL + str(device_id) +
-                    "/statistics/30days", headers=self._headers,
+                    "/consumption/daily", headers=self._headers,
                     cookies=self._cookies, timeout=self._timeout)
         except OSError:
             raise PyNeviwebError("Cannot get device daily stats...")
@@ -442,8 +439,8 @@ class NeviwebClient(object):
         self._cookies.update(raw_res.cookies)
         # Prepare data
         data = raw_res.json()
-        if "values" in data:
-            return data["values"]
+        if "history" in data:
+            return data["history"]
         else:
             _LOGGER.debug("Daily stat error: %s, device: %s", data, device_id)
             return None
@@ -456,7 +453,7 @@ class NeviwebClient(object):
         # Http request
         try:
             raw_res = requests.get(DEVICE_DATA_URL + str(device_id) +
-                "/statistics/24hours", headers=self._headers,
+                "/consumption/hourly", headers=self._headers,
                 cookies=self._cookies, timeout=self._timeout)
         except OSError:
             raise PyNeviwebError("Cannot get device hourly stats...")
@@ -465,8 +462,8 @@ class NeviwebClient(object):
         self._cookies.update(raw_res.cookies)
         # Prepare data
         data = raw_res.json()
-        if "values" in data:
-            return data["values"]
+        if "history" in data:
+            return data["history"]
         else:
             _LOGGER.debug("Hourly stat error: %s, device: %s", data, device_id)
             return None

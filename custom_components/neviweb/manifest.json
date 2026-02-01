@@ -1,12 +1,12 @@
 {
   "domain": "neviweb",
-  "name": "Sinope Neviweb",
+  "name": "Schluter DITRA-HEAT-E-RS1",
   "codeowners": [
-    "@claudegel"
+    "@ClayKaiser"
   ],
-  "documentation": "https://github.com/claudegel/sinope-1",
+  "documentation": "https://github.com/ClayKaiser/sinope-schluter",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/claudegel/sinope-1/issues",
+  "issue_tracker": "https://github.com/CLayKaiser/sinope-schluter/issues",
   "version": "2.3.1"
 }

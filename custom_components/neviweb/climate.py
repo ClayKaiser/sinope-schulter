@@ -1,16 +1,5 @@
 """
-Support for Neviweb thermostat.
-type 10 = thermostat TH1120RF 3000W and 4000W, model 1120, 1122
-type 10 = thermostat TH1121RF 3000W and 4000W, (Public place) model 1121, 1123
-type 20 = thermostat TH1300RF 3600W floor, model 735
-type 20 = thermostat TH1500RF double pole thermostat, model 735-DP
-type 21 = thermostat TH1400RF low voltage, model 735
-type 10 = thermostat OTH2750-GT Ouellet,
-type 20 = thermostat OTH3600-GA-GT Ouellet floor, model 735
-type 10 = thermostat OTH4000-GT Ouellet,
-type 20 = thermostat INSTINCT Connect, Flextherm, FLP45
-For more details about this platform, please refer to the documentation at  
-https://www.sinopetech.com/en/support/#api
+Support for Schluter DITRA-HEAT-E-RS1.
 """
 import logging
 
@@ -174,10 +163,7 @@ PRESET_MODES = [
     PRESET_BYPASS,
 ]
 
-IMPLEMENTED_LOW_VOLTAGE = [21]
-IMPLEMENTED_THERMOSTAT = [10]
-IMPLEMENTED_FLOOR_THERMOSTAT = [20]
-IMPLEMENTED_DEVICE_TYPES = IMPLEMENTED_THERMOSTAT + IMPLEMENTED_LOW_VOLTAGE + IMPLEMENTED_FLOOR_THERMOSTAT
+IMPLEMENTED_DEVICE_MODEL = [740]
 
 SET_ACTIVATION_SCHEMA = vol.Schema(
     {
@@ -306,16 +292,16 @@ async def async_setup_platform(
     entities = []
     for device_info in data.neviweb_client.gateway_data:
         if "signature" in device_info and \
-            "type" in device_info["signature"] and \
-            device_info["signature"]["type"] in IMPLEMENTED_DEVICE_TYPES:
-            device_name = "{} {}".format(DEFAULT_NAME, device_info["name"])
+            "model" in device_info["signature"] and \
+            device_info["signature"]["model"] in IMPLEMENTED_DEVICE_MODEL:
+            device_name = device_info["name"]
             device_sku = device_info["sku"]
             entities.append(NeviwebThermostat(data, device_info, device_name, device_sku))
     for device_info in data.neviweb_client.gateway_data2:
         if "signature" in device_info and \
-            "type" in device_info["signature"] and \
-            device_info["signature"]["type"] in IMPLEMENTED_DEVICE_TYPES:
-            device_name = "{} {}".format(DEFAULT_NAME, device_info["name"])
+            "model" in device_info["signature"] and \
+            device_info["signature"]["model"] in IMPLEMENTED_DEVICE_MODEL:
+            device_name = device_info["name"]
             device_sku = device_info["sku"]
             entities.append(NeviwebThermostat(data, device_info, device_name, device_sku))
 
@@ -650,30 +636,17 @@ class NeviwebThermostat(ClimateEntity):
         self._hour_energy_kwh = None
         self._temperature_format = UnitOfTemperature.CELSIUS
         self._energy_stat_time = time.time() - 1500
-        self._is_low_voltage = device_info["signature"]["type"] in \
-            IMPLEMENTED_LOW_VOLTAGE
-        self._is_floor = device_info["signature"]["type"] in \
-            IMPLEMENTED_FLOOR_THERMOSTAT
+        self._is_low_voltage = False
+        self._is_floor = True
         _LOGGER.debug("Setting up %s: %s", self._name, device_info)
 
     def update(self):
         """Get the latest data from Neviweb and update the state."""
         if self._active:
-            if not self._is_low_voltage and not self._is_floor:
-                ECO_ATTRIBUTE = [ATTR_SHED_STATUS, ATTR_BACKLIGHT]
-            else:
-                ECO_ATTRIBUTE = []
-            if self._is_floor:
-                FLOOR_ATTRIBUTE = [ATTR_BACKLIGHT_MODE, ATTR_FLOOR_MODE, ATTR_AUX_CONFIG, ATTR_AUX_WATTAGE_OVERRIDE, ATTR_FLOOR_MAX, ATTR_FLOOR_MIN, ATTR_FLOOR_AIR_LIMIT, \
+            ECO_ATTRIBUTE = []
+            FLOOR_ATTRIBUTE = [ATTR_BACKLIGHT_MODE, ATTR_FLOOR_MODE, ATTR_AUX_CONFIG, ATTR_AUX_WATTAGE_OVERRIDE, ATTR_FLOOR_MAX, ATTR_FLOOR_MIN, ATTR_FLOOR_AIR_LIMIT, \
                             ATTR_FLOOR_SETPOINT_MAX, ATTR_FLOOR_SETPOINT_MIN, ATTR_FLOOR_SETPOINT, ATTR_FLOOR_TEMP, ATTR_FLOOR_SENSOR_TYPE, ATTR_ALARM_1, ATTR_AUX_OUTPUT_STAGE]
-            else:
-                FLOOR_ATTRIBUTE = []
-            if self._is_low_voltage:
-                LOW_ATTRIBUTE = [ATTR_BACKLIGHT_MODE, ATTR_FLOOR_MODE, ATTR_AUX_CONFIG, ATTR_AUX_WATTAGE_OVERRIDE, ATTR_FLOOR_MAX, ATTR_FLOOR_MIN, ATTR_FLOOR_AIR_LIMIT, \
-                            ATTR_FLOOR_SETPOINT_MAX, ATTR_FLOOR_SETPOINT_MIN, ATTR_FLOOR_SETPOINT, ATTR_FLOOR_TEMP, ATTR_FLOOR_SENSOR_TYPE, ATTR_CYCLE_LENGTH, \
-                            ATTR_AUX_CYCLE_LENGTH, ATTR_PUMP_PROTEC, ATTR_ALARM_1, ATTR_WATTAGE_OVERRIDE]
-            else:
-                LOW_ATTRIBUTE = [ATTR_WATTAGE]
+            LOW_ATTRIBUTE = [ATTR_WATTAGE]
             start = time.time()
             device_data = self._client.get_device_attributes(self._id,
                 UPDATE_ATTRIBUTES + ECO_ATTRIBUTE + FLOOR_ATTRIBUTE + LOW_ATTRIBUTE)
@@ -685,102 +658,49 @@ class NeviwebThermostat(ClimateEntity):
             if "error" not in device_data:
                 if "errorCode" not in device_data:
                     self._cur_temp_before = self._cur_temp
+                    # roomTemperature
                     self._cur_temp = float(device_data[ATTR_ROOM_TEMPERATURE]["value"]) if \
                         device_data[ATTR_ROOM_TEMPERATURE]["value"] != None else self._cur_temp_before
+                    # setpointMode
+                    self._operation_mode = device_data[ATTR_SETPOINT_MODE]
+                    # roomSetpoint
                     self._target_temp = float(device_data[ATTR_ROOM_SETPOINT]) if \
                         device_data[ATTR_SETPOINT_MODE] != MODE_OFF else 0.0
+                    # outputPercentDisplay
+                    if ATTR_OUTPUT_PERCENT_DISPLAY in device_data:
+                        self._heat_level = device_data[ATTR_OUTPUT_PERCENT_DISPLAY]["percent"]
+                    # airFloorMode
+                    if ATTR_FLOOR_MODE in device_data:
+                        self._floor_mode = device_data[ATTR_FLOOR_MODE]
+                    # floorLimitHigh
+                    if ATTR_FLOOR_MAX in device_data:
+                        self._floor_max = device_data[ATTR_FLOOR_MAX]["value"]
+                    # floorLimitLow
+                    if ATTR_FLOOR_MIN in device_data:
+                        self._floor_min = device_data[ATTR_FLOOR_MIN]["value"]
+                    # floorSensorType
+                    if ATTR_FLOOR_SENSOR_TYPE in device_data:
+                        self._sensor_type = device_data[ATTR_FLOOR_SENSOR_TYPE]
+                    # roomSetpointMin
+                    if ATTR_ROOM_SETPOINT_MIN in device_data:
+                        self._min_temp = float(device_data[ATTR_ROOM_SETPOINT_MIN])
+                    # roomSetpointMax
+                    if ATTR_ROOM_SETPOINT_MAX in device_data:
+                        self._max_temp = float(device_data[ATTR_ROOM_SETPOINT_MAX])
+                    # roomSetpointAway
                     if ATTR_AWAY_SETPOINT in device_data:
                         self._away_temp = float(device_data[ATTR_AWAY_SETPOINT])
-                    else:
-                        _LOGGER.debug("Attribute roomSetpointAway is missing: %s", device_data)
-                    self._heat_level = device_data[ATTR_OUTPUT_PERCENT_DISPLAY]
-                    self._rssi = device_data[ATTR_RSSI]
-                    self._operation_mode = device_data[ATTR_SETPOINT_MODE]
-                    self._min_temp = float(device_data[ATTR_ROOM_SETPOINT_MIN])
-                    self._max_temp = float(device_data[ATTR_ROOM_SETPOINT_MAX])
-                    if ATTR_EARLY_START in device_data:
-                        self._early_start = device_data[ATTR_EARLY_START]
-                    self._keypad = device_data[ATTR_KEYPAD]
-                    if ATTR_DISPLAY_2 in device_data:
-                        self._display_2 = device_data[ATTR_DISPLAY_2]
-                    self._temperature_format = device_data[ATTR_TEMP]
+                    # timeFormat
                     self._time_format = device_data[ATTR_TIME]
-                    if ATTR_BACKLIGHT in device_data:
-                        self._backlight = device_data[ATTR_BACKLIGHT]
-#                    else:
-#                        _LOGGER.debug("Attribute backlightIntensityIdle is missing: %s", device_data)
-                    if not self._is_low_voltage:
-                        if ATTR_WATTAGE in device_data:
-                            self._wattage = device_data[ATTR_WATTAGE]["value"]
-                    else:
-                        self._wattage = device_data[ATTR_WATTAGE_OVERRIDE]
-                    if self._is_floor:
-                        if self._model == 735:
-                            if ATTR_FLOOR_MODE in device_data:
-                                self._floor_mode = device_data[ATTR_FLOOR_MODE]
-                            if ATTR_FLOOR_SETPOINT in device_data:
-                                self._floor_setpoint = device_data[ATTR_FLOOR_SETPOINT]
-                            if ATTR_FLOOR_TEMP in device_data:
-                                self._floor_temperature = device_data[ATTR_FLOOR_TEMP]["value"]
-                                self._floor_temp_error = device_data[ATTR_FLOOR_TEMP]["error"]
-                            if ATTR_AUX_CONFIG in device_data:
-                                self._em_heat = device_data[ATTR_AUX_CONFIG]
-                            if ATTR_AUX_WATTAGE_OVERRIDE in device_data:
-                                self._aux_wattage = device_data[ATTR_AUX_WATTAGE_OVERRIDE]
-                            if ATTR_AUX_OUTPUT_STAGE in device_data:
-                                self._aux_output_stage = device_data[ATTR_AUX_OUTPUT_STAGE]
-                            if ATTR_FLOOR_AIR_LIMIT in device_data:
-                                self._floor_air_limit = device_data[ATTR_FLOOR_AIR_LIMIT]["value"]
-                            if ATTR_FLOOR_MAX in device_data:
-                                self._floor_max = device_data[ATTR_FLOOR_MAX]["value"]
-                            if ATTR_FLOOR_MIN in device_data:
-                                self._floor_min = device_data[ATTR_FLOOR_MIN]["value"]
-                            if ATTR_FLOOR_SETPOINT_MAX in device_data:
-                                self._floor_setpoint_max = device_data[ATTR_FLOOR_SETPOINT_MAX]
-                            if ATTR_FLOOR_SETPOINT_MIN in device_data:
-                                self._floor_setpoint_min = device_data[ATTR_FLOOR_SETPOINT_MIN]
-                            if ATTR_FLOOR_SENSOR_TYPE in device_data:
-                                self._sensor_type = device_data[ATTR_FLOOR_SENSOR_TYPE]
-                            if ATTR_BACKLIGHT_MODE in device_data:
-                                self._backlight = device_data[ATTR_BACKLIGHT_MODE]
-#                            else:
-#                                _LOGGER.debug("Attribute backlightAdaptive is missing: %s", device_data)
-                    if self._is_low_voltage:
-                        self._floor_mode = device_data[ATTR_FLOOR_MODE]
-                        if ATTR_FLOOR_SETPOINT in device_data:
-                            self._floor_setpoint = device_data[ATTR_FLOOR_SETPOINT]
-                        else:
-                            self._floor_setpoint = None
-                        if ATTR_FLOOR_TEMP in device_data:
-                            self._floor_temperature = device_data[ATTR_FLOOR_TEMP]["value"]
-                            self._floor_temp_error = device_data[ATTR_FLOOR_TEMP]["error"]
-                        else:
-                            self._floor_temperature = None
-                        self._floor_setpoint_max = device_data[ATTR_FLOOR_SETPOINT_MAX]
-                        self._floor_setpoint_min = device_data[ATTR_FLOOR_SETPOINT_MIN]
-                        self._cycle_length = device_data[ATTR_CYCLE_LENGTH]
-                        self._em_heat = device_data[ATTR_AUX_CONFIG]
-                        self._aux_cycle_config = device_data[ATTR_AUX_CONFIG]
-                        self._aux_cycle_length = device_data[ATTR_AUX_CYCLE_LENGTH]
-                        self._aux_wattage = device_data[ATTR_AUX_WATTAGE_OVERRIDE]
-                        if device_data[ATTR_FLOOR_AIR_LIMIT]["status"] =="off":
-                            self._floor_air_limit = None
-                        else:
-                            self._floor_air_limit = device_data[ATTR_FLOOR_AIR_LIMIT]["value"]
-                        if device_data[ATTR_FLOOR_MAX]["status"] != "off":
-                            self._floor_max = device_data[ATTR_FLOOR_MAX]["value"]
-                            self._floor_min = device_data[ATTR_FLOOR_MIN]["value"]
-                        else:
-                            self._floor_max = None
-                            self._floor_min = None
-                        self._sensor_type = device_data[ATTR_FLOOR_SENSOR_TYPE]
-                        if ATTR_PUMP_PROTEC in device_data:
-                            self._pump_protec_freq = device_data[ATTR_PUMP_PROTEC]["frequency"]
-                            self._pump_protec_duration = device_data[ATTR_PUMP_PROTEC]["duration"]
-                        if ATTR_BACKLIGHT_MODE in device_data:
-                            self._backlight = device_data[ATTR_BACKLIGHT_MODE]
-#                        else:
-#                            _LOGGER.debug("Attribute backlightAdaptive is missing: %s", device_data)
+                    # temperatureFormat
+                    self._temperature_format = device_data[ATTR_TEMP]
+                    # floorMaxAirTemperature
+                    if ATTR_FLOOR_AIR_LIMIT in device_data:
+                        self._floor_air_limit = device_data[ATTR_FLOOR_AIR_LIMIT]["value"]
+                    # floorTemperature
+                    if ATTR_FLOOR_TEMP in device_data:
+                        self._floor_temperature = device_data[ATTR_FLOOR_TEMP]["value"]
+                        self._floor_temp_error = device_data[ATTR_FLOOR_TEMP]["error"]
                     if ATTR_ALARM in device_data:
                         self._alarm_0_type = device_data[ATTR_ALARM]["type"]
                         self._alarm_0_severity = device_data[ATTR_ALARM]["severity"]
@@ -812,16 +732,17 @@ class NeviwebThermostat(ClimateEntity):
                     _LOGGER.warning("Device %s statistics unavailables, %s:", self._name, device_data)
                 else:
                     _LOGGER.warning("Unknown error, device: %s, error: %s", self._name, device_data)
-
             if start - self._energy_stat_time > 1800 and self._energy_stat_time != 0:
                 device_hourly_stats = self._client.get_device_hourly_stats(self._id)
+                _LOGGER.debug("Hourly stats for %s: %s", self._name, device_hourly_stats)
                 if device_hourly_stats is not None:
-                    self._hour_energy_kwh = round(device_hourly_stats[0] / 1000, 3)
+                    self._hour_energy_kwh = round(device_hourly_stats[-1]['period'] / 1000, 3)
                 else:
                     _LOGGER.warning("Got None for device_hourly_stats")
                 device_daily_stats = self._client.get_device_daily_stats(self._id)
+                _LOGGER.debug("Daily stats for %s: %s", self._name, device_daily_stats)
                 if device_daily_stats is not None:
-                    self._today_energy_kwh = round(device_daily_stats[0] / 1000, 3)
+                    self._today_energy_kwh = round(device_daily_stats[-1]['period'] / 1000, 3)
                 else:
                     _LOGGER.warning("Got None for device_daily_stats")
                 self._energy_stat_time = time.time()
@@ -852,16 +773,7 @@ class NeviwebThermostat(ClimateEntity):
     def extra_state_attributes(self):
         """Return the state attributes."""
         data = {}
-        if not self._is_floor and not self._is_low_voltage:
-            data.update({'eco_status': self._shed_stat_temp,
-                    'eco_power': self._shed_stat_power,
-                    'eco_optout': self._shed_stat_optout})
-        if self._is_floor and not self._sku == "TH1500RF":
-            data.update({'auxiliary_status': self._em_heat,
-                    'auxiliary_load': self._aux_wattage,
-                    'aux_output_stage': self._aux_output_stage})
-        if self._is_floor:
-            data.update({'sensor_mode': self._floor_mode,
+        data.update({'sensor_mode': self._floor_mode,
                     'floor_sensor_type': self._sensor_type,
                     'floor_setpoint': self._floor_setpoint,
                     'floor_temperature': self._floor_temperature,
@@ -871,24 +783,6 @@ class NeviwebThermostat(ClimateEntity):
                     'floor_temp_min': self._floor_min,
                     'floor_setpoint_max': self._floor_setpoint_max,
                     'floor_setpoint_min': self._floor_setpoint_min})
-        if self._is_low_voltage:
-            data.update({'sensor_mode': self._floor_mode,
-                    'auxiliary_status': self._em_heat,
-                    'auxiliary_load': self._aux_wattage,
-                    'auxiliary_output_conf': self._aux_cycle_config,
-                    'auxiliary_output_cycle': neviweb_to_ha(self._aux_cycle_length),
-                    'cycle_length': neviweb_to_ha(self._cycle_length),
-                    'floor_sensor_type': self._sensor_type,
-                    'floor_setpoint': self._floor_setpoint,
-                    'floor_temperature': self._floor_temperature,
-                    'floor_temp_error': self._floor_temp_error,
-                    'floor_air_limit': self._floor_air_limit,
-                    'floor_temp_max': self._floor_max,
-                    'floor_temp_min': self._floor_min,
-                    'floor_setpoint_max': self._floor_setpoint_max,
-                    'floor_setpoint_min': self._floor_setpoint_min,
-                    'pump_protection_freq': self._pump_protec_freq,
-                    'pump_protection_duration': self._pump_protec_duration})
         data.update ({'heat_level': self._heat_level,
                     'pi_heating_demand': self._heat_level,
                     'wattage': self._wattage,
@@ -912,17 +806,13 @@ class NeviwebThermostat(ClimateEntity):
                     'alarm1_duration': self._alarm_1_duration,
                     'sku': self._sku,
                     'model': self._model,
-                    'activation': self._active,
-                    'id': self._id})
+                    'id': str(self._id)})
         return data
 
     @property
     def supported_features(self):
         """Return the list of supported features."""
-        if self._is_floor or self._is_low_voltage:
-            return SUPPORT_AUX_FLAGS
-        else:
-            return SUPPORT_FLAGS
+        return SUPPORT_AUX_FLAGS
 
     @property
     def is_em_heat(self):
@@ -1198,13 +1088,7 @@ class NeviwebThermostat(ClimateEntity):
 
     def turn_em_heat_on(self):
         """Turn emergency heater on."""
-        if self._is_floor:
-            self._em_heat = "slave"
-        else:
-            if self._aux_cycle_length == "short":
-                self._em_heat = "shortCycle"
-            else:
-                self._em_heat = "longCycle"
+        self._em_heat = "slave"
         self._client.set_em_heat(
             self._id, self._em_heat, self._aux_cycle_length, self._is_floor)
 

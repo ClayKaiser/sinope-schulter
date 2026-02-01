@@ -2,15 +2,13 @@
     "neviweb": {
         "version": "2.2.7",
         "local_location": "/custom_components/neviweb/__init__.py",
-        "remote_location": "https://github.com/claudegel/sinope-1/tree/master/custom_components/neviweb/__init__.py",
-        "visit_repo": "https://github.com/claudegel/sinope-1",
-        "changelog": "https://github.com/claudegel/sinope-1/wiki/Changelog",
+        "remote_location": "https://github.com/ClayKaiser/sinope-schluter/tree/master/custom_components/neviweb/__init__.py",
+        "visit_repo": "https://github.com/ClayKaiser/sinope-schluter",
+        "changelog": "https://github.com/ClayKaiser/sinope-schluter/wiki/Changelog",
         "resources": [
-            "https://github.com/claudegel/sinope-1/tree/master/custom_components/neviweb/light.py",
-            "https://github.com/claudegel/sinope-1/tree/master/custom_components/neviweb/climate.py",
-            "https://github.com/claudegel/sinope-1/tree/master/custom_components/neviweb/switch.py",
-            "https://github.com/claudegel/sinope-1/tree/master/custom_components/neviweb/const.py",
-            "https://github.com/claudegel/sinope-1/tree/master/custom_components/neviweb/services.yaml",
+            "https://github.com/ClayKaiser/sinope-schluter/tree/master/custom_components/neviweb/climate.py",
+            "https://github.com/ClayKaiser/sinope-schluter/tree/master/custom_components/neviweb/const.py",
+            "https://github.com/ClayKaiser/sinope-schluter/tree/master/custom_components/neviweb/services.yaml"
         ]
     }
 }
