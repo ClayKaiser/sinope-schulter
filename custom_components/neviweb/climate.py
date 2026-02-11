@@ -39,6 +39,8 @@ from homeassistant.helpers import (
 from homeassistant.components.sensor import SensorDeviceClass
 
 from datetime import timedelta
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.event import track_time_interval
 from .const import (
     DOMAIN,
@@ -755,19 +757,20 @@ class NeviwebThermostat(ClimateEntity):
         return self._id
 
     @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information to group with other entities."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._id)},
+            name=self._name,
+            manufacturer="Schluter",
+            model=self._sku,
+            entry_type=DeviceEntryType.SERVICE,
+        )
+
+    @property
     def name(self):
         """Return the name of the thermostat."""
         return self._name
-
-    @property
-    def unit_of_measurement(self):
-        """Return the unit of measurement of this entity, if any."""
-        return temp_format_to_ha(self._temperature_format)
-
-    @property
-    def device_class(self):
-        """Return the device class of this entity."""
-        return SensorDeviceClass.TEMPERATURE
 
     @property
     def extra_state_attributes(self):

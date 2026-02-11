@@ -142,6 +142,7 @@ def setup(hass: HomeAssistant, hass_config: dict[str, Any]) -> bool:
     _LOGGER.debug("Setting scan interval to: %s", SCAN_INTERVAL)
 
     discovery.load_platform(hass, 'climate', DOMAIN, {}, hass_config)
+    discovery.load_platform(hass, 'sensor', DOMAIN, {}, hass_config)
 
     return True
 
@@ -359,6 +360,7 @@ class NeviwebClient(object):
                 "/attribute?attributes=" + ",".join(attributes), 
                 headers=self._headers, cookies=self._cookies,
                 timeout=self._timeout)
+            _LOGGER.debug("%s Attributes data : %s", attributes, raw_res.json())
         except requests.exceptions.ReadTimeout:
             return {"errorCode": "ReadTimeout"}
         except Exception as e:
@@ -432,6 +434,7 @@ class NeviwebClient(object):
             raw_res = requests.get(DEVICE_DATA_URL + str(device_id) +
                     "/consumption/daily", headers=self._headers,
                     cookies=self._cookies, timeout=self._timeout)
+            _LOGGER.debug("Received daily stats: %s", raw_res.json())
         except OSError:
             raise PyNeviwebError("Cannot get device daily stats...")
             return None
@@ -455,6 +458,7 @@ class NeviwebClient(object):
             raw_res = requests.get(DEVICE_DATA_URL + str(device_id) +
                 "/consumption/hourly", headers=self._headers,
                 cookies=self._cookies, timeout=self._timeout)
+            _LOGGER.debug("Received hourly stats : %s", raw_res.json())
         except OSError:
             raise PyNeviwebError("Cannot get device hourly stats...")
             return None

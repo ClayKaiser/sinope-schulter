@@ -6,19 +6,22 @@ For more details about this platform, please refer to the documentation at
 https://www.sinopetech.com/en/support/#api
 """
 
+import asyncio
 import datetime
 import logging
+from datetime import datetime as dt
 
 import voluptuous as vol
 import time
 
 import custom_components.neviweb as neviweb
 from . import (SCAN_INTERVAL)
-from homeassistant.components.sensor import PLATFORM_SCHEMA
+from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity, SensorDeviceClass, SensorStateClass
 
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     STATE_OK,
+    UnitOfEnergy,
 )
 
 from homeassistant.helpers import (
@@ -31,13 +34,11 @@ from homeassistant.helpers import (
     device_registry,
 )
 
-from homeassistant.components.sensor import SensorDeviceClass
-
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 
 from datetime import timedelta
 from homeassistant.helpers.event import track_time_interval
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity import DeviceInfo
 from .const import (
     DOMAIN,
     ATTR_LOCAL_SYNC,
@@ -52,11 +53,9 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_NAME = 'neviweb sensor'
 
-UPDATE_ATTRIBUTES = [
-    ATTR_LOCAL_SYNC,
-]
+UPDATE_ATTRIBUTES = []
 
-IMPLEMENTED_DEVICE_MODEL = [125] # GT125
+IMPLEMENTED_THERMOSTAT_MODEL = [740] # DITRA-HEAT-E-RS1
 
 SET_NEVIWEB_STATUS_SCHEMA = vol.Schema(
     {
@@ -77,24 +76,26 @@ async def async_setup_platform(
     # Wait for async migration to be done
     await data.migration_done.wait()
 
-    entities: list[Entity] = []
+    entities = []
     entities.append(NeviwebDailyRequestSensor(hass))
     for device_info in data.neviweb_client.gateway_data:
         if "signature" in device_info and \
             "model" in device_info["signature"] and \
-            device_info["signature"]["model"] in IMPLEMENTED_DEVICE_MODEL:
-            device_name = '{} {}'.format(DEFAULT_NAME, device_info["name"])
+            device_info["signature"]["model"] in IMPLEMENTED_THERMOSTAT_MODEL:
+            device_name = device_info["name"]
             device_sku = device_info["sku"]
             location_id = device_info["location$id"]
             entities.append(NeviwebSensor(data, device_info, device_name, device_sku, location_id))
+            entities.append(NeviwebHourlyEnergySensor(hass, data, device_info, device_name, device_sku))
     for device_info in data.neviweb_client.gateway_data2:
         if "signature" in device_info and \
             "model" in device_info["signature"] and \
-            device_info["signature"]["model"] in IMPLEMENTED_DEVICE_MODEL:
-            device_name = '{} {}'.format(DEFAULT_NAME, device_info["name"])
+            device_info["signature"]["model"] in IMPLEMENTED_THERMOSTAT_MODEL:
+            device_name = device_info["name"]
             device_sku = device_info["sku"]
             location_id = device_info["location$id"]
             entities.append(NeviwebSensor(data, device_info, device_name, device_sku, location_id))
+            entities.append(NeviwebHourlyEnergySensor(hass, data, device_info, device_name, device_sku))
 
     async_add_entities(entities, True)
 
@@ -116,104 +117,169 @@ async def async_setup_platform(
         schema=SET_NEVIWEB_STATUS_SCHEMA,
     )
 
-class NeviwebSensor(Entity):
+
+class NeviwebSensor(SensorEntity):
     """Implementation of a Neviweb sensor."""
 
     def __init__(self, data, device_info, name, sku, location):
         """Initialize."""
-        self._name = name
+        self._attr_name = name
         self._sku = sku
         self._location = location
         self._client = data.neviweb_client
-        self._id = str(device_info["id"])
+        self._attr_unique_id = str(device_info["id"])
         self._gateway_status = None
         self._occupancyMode = None
-        self._sync = None
-        _LOGGER.debug("Setting up %s: %s", self._name, device_info)
+        _LOGGER.debug("Setting up %s: %s", self._attr_name, device_info)
 
     def update(self):
         """Get the latest data from Neviweb and update the state."""
         start = time.time()
-        device_status = self._client.get_device_status(self._id)
+        device_status = self._client.get_device_status(self._attr_unique_id)
         neviweb_status = self._client.get_neviweb_status(self._location)
-        device_data = self._client.get_device_attributes(self._id,
-            UPDATE_ATTRIBUTES)
         end = time.time()
         elapsed = round(end - start, 3)
         _LOGGER.debug("Updating %s (%s sec): %s",
-            self._name, elapsed, device_data)
-        _LOGGER.debug("Updating %s (%s sec): %s",
-            self._name, elapsed, device_status)
+            self._attr_name, elapsed, device_status)
         self._gateway_status = device_status[ATTR_STATUS]
         self._occupancyMode = neviweb_status[ATTR_OCCUPANCY]
-        if "error" not in device_data:
-            if "errorCode" not in device_data:
-                self._sync = device_data[ATTR_LOCAL_SYNC]
-            else:
-                if device_data["errorCode"] == "ReadTimeout":
-                    _LOGGER.warning("Error in reading device %s: (%s), too slow to respond or busy.", self._name, device_data)
-                else:
-                    _LOGGER.warning("Unknown errorCode, device: %s, error: %s", self._name, device_data)
-        else:
-            if device_data["error"]["code"] == "USRSESSEXP":
-                _LOGGER.warning("Session expired... reconnecting...")
-                self._client.reconnect()
-            elif device_data["error"]["code"] == "DVCCOMMTO":  
-                _LOGGER.warning("Cannot update %s: %s. Device is busy or does not respond quickly enough.", self._name, device_data)
-            elif device_data["error"]["code"] == "SVCINVREQ":
-                _LOGGER.warning("Invalid or malformed request to Neviweb, %s:",  device_data)
-            elif device_data["error"]["code"] == "DVCACTNSPTD":
-                _LOGGER.warning("Device action not supported, %s:",  device_data)
-            elif device_data["error"]["code"] == "DVCUNVLB":
-                _LOGGER.warning("Device %s unavailable, Neviweb maintnance update, %s:", self._name, device_data)
-            elif device_data["error"]["code"] == "SVCERR":
-                _LOGGER.warning("Device %s statistics unavailables, %s:", self._name, device_data)
-            else:
-                _LOGGER.warning("Unknown error, device: %s, error: %s", self._name, device_data)
+
+
+class NeviwebHourlyEnergySensor(SensorEntity):
+    """Sensor for hourly energy consumption from thermostats."""
+
+    def __init__(self, hass, data, device_info, name, sku):
+        """Initialize the daily energy sensor."""
+        self._hass = hass
+        self._data = data
+        self._client = data.neviweb_client
+        self._device_id = str(device_info["id"])
+        self._attr_name = f"{name} Daily Energy"
+        self._sku = sku
+        self._attr_native_value = 0.0  # Initialize with 0 to keep entity available
+        # Initialize last_reset to midnight UTC
+        now_utc = dt.now(datetime.timezone.utc)
+        self._attr_last_reset = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        self._attr_unique_id = f"{self._device_id}_daily_energy"
+        self._last_update_hour = -1  # Track the hour of the last update to update once per hour
+        _LOGGER.debug("Setting up daily energy sensor for %s: %s", self._attr_name, device_info)
 
     @property
-    def unique_id(self):
-        """Return unique ID based on Neviweb device ID."""
-        return self._id
+    def device_info(self) -> DeviceInfo:
+        """Return device information to group with thermostat entity."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            name=self._attr_name.replace(" Hourly Energy", ""),
+            manufacturer="Schluter",
+            model=self._sku,
+        )
 
     @property
-    def name(self):
-        """Return the name of the sensor."""
-        return self._name
+    def native_value(self):
+        """Return the cumulative hourly energy consumption in kWh."""
+        return self._attr_native_value
+
+    @property
+    def native_unit_of_measurement(self):
+        """Return the unit of measurement."""
+        return UnitOfEnergy.KILO_WATT_HOUR
 
     @property
     def device_class(self):
-        """Return the device class of this entity."""
-        return BinarySensorDeviceClass.CONNECTIVITY
+        """Return the device class."""
+        return SensorDeviceClass.ENERGY
 
-    @property  
-    def is_on(self):
-        """Return current operation i.e. ON, OFF """
-        return self._gateway_status is not None
+    @property
+    def state_class(self):
+        """Return the state class indicating this is a total aggregated value."""
+        return SensorStateClass.TOTAL
+
+    @property
+    def last_reset(self):
+        """Return the last reset time (first period in the returned data)."""
+        return self._attr_last_reset
+
+    @property
+    def icon(self):
+        """Return the icon."""
+        return "mdi:flash"
 
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        return {'gateway_status': self._gateway_status,
-                'neviweb_occupancyMode': self._occupancyMode,
-                'local_sync': self._sync,
-                'sku': self._sku,
-                'id': self._id}
+        return {
+            'sku': self._sku,
+            'id': self._device_id,
+        }
 
-    @property
-    def state(self):
-        """Return the state of the sensor."""
-        return self._gateway_status
+    def _parse_iso_timestamp(self, iso_str):
+        """Parse ISO 8601 timestamp string to datetime object."""
+        try:
+            # Handle formats like "2026-02-09T02:00:00.000Z"
+            if iso_str.endswith('Z'):
+                iso_str = iso_str[:-1] + '+00:00'
+            # Remove microseconds if needed for parsing
+            if '.' in iso_str:
+                parts = iso_str.split('.')
+                iso_str = parts[0] + '+00:00'
+            return dt.fromisoformat(iso_str)
+        except Exception as err:
+            _LOGGER.error("Failed to parse timestamp %s: %s", iso_str, err)
+            return None
 
-    def set_neviweb_status(self, value):
-        """Set Neviweb global mode away or home"""
-        mode = value["mode"]
-        entity = value["id"]
-        self._client.post_neviweb_status(entity, str(self._location), mode)
-        self._occupancyMode = mode
+    def update(self):
+        """Update the daily energy data from the device once per hour (with grace period for API updates)."""
+        # Only update if we've entered a new hour AND we're at least 5 minutes into it (UTC)
+        # This allows time for the API to provide updated hourly data
+        now_utc = dt.now(datetime.timezone.utc)
+        current_hour = now_utc.hour
+        
+        if current_hour == self._last_update_hour:
+            return  # Already updated in this hour
+        
+        # Check if we're at least 5 minutes past the hour boundary
+        if now_utc.minute < 5:
+            return  # Too early; wait for API to update
+        
+        try:
+            # Get hourly energy consumption stats from API (in Wh)
+            device_hourly_stats = self._client.get_device_hourly_stats(self._device_id)
+            _LOGGER.debug("Hourly stats for %s: %s", self._attr_name, device_hourly_stats)
+            
+            if device_hourly_stats is not None and len(device_hourly_stats) > 0:
+                # Calculate midnight UTC for filtering
+                midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                # Filter entries from current day (>= midnight UTC) and sum them
+                today_entries = []
+                for entry in device_hourly_stats:
+                    if 'date' in entry:
+                        parsed_time = self._parse_iso_timestamp(entry['date'])
+                        if parsed_time and parsed_time >= midnight_utc:
+                            today_entries.append(entry)
+                
+                if today_entries:
+                    total_wh = sum(entry.get('period', 0) for entry in today_entries)
+                    self._attr_native_value = round(total_wh / 1000, 3)
+                    self._attr_last_reset = midnight_utc
+                    
+                    _LOGGER.debug(
+                        "Updated cumulative daily energy for %s: %s kWh (%d entries since midnight)",
+                        self._attr_name,
+                        self._attr_native_value,
+                        len(today_entries),
+                    )
+                else:
+                    _LOGGER.debug("No entries from current day for %s", self._attr_name)
+            else:
+                _LOGGER.debug("No hourly stats available for %s", self._attr_name)
+        except Exception as err:
+            _LOGGER.error("Error updating daily energy for %s: %s", self._attr_name, err)
+        finally:
+            self._last_update_hour = current_hour
 
 
-class NeviwebDailyRequestSensor(Entity):
+class NeviwebDailyRequestSensor(SensorEntity):
     """Sensor interne : nombre de requêtes Neviweb130 aujourd'hui."""
 
     def __init__(self, hass):
@@ -223,15 +289,7 @@ class NeviwebDailyRequestSensor(Entity):
         self._notified = False
 
     @property
-    def name(self):
-        return self._attr_name
-
-    @property
-    def unique_id(self):
-        return self._attr_unique_id
-
-    @property
-    def state(self):
+    def native_value(self):
         return get_daily_request_count(self._hass)
 
     @property
